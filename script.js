@@ -126,16 +126,24 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
 
   // --- 기본 크레용 팔레트 (전문적인 색 보정 없이 강제로 스냅) ---
   const PALETTE = [
-    [250, 230, 200], // 살구색
+    [250, 230, 200], // 살구색(밝은 피부)
+    [224, 172, 130], // 살구색(어두운 피부)
     [255, 224, 130], // 노랑
-    [255, 138, 101], // 주황
+    [255, 183, 77],  // 주황(밝음)
+    [255, 138, 101], // 주황(진함)
     [239, 83, 80],   // 빨강
     [186, 104, 200], // 보라
+    [149, 117, 205], // 남보라
     [66, 133, 244],  // 파랑
+    [100, 181, 246], // 하늘색
     [77, 182, 172],  // 청록
-    [129, 199, 132], // 초록
+    [129, 199, 132], // 초록(밝음)
+    [76, 140, 90],   // 초록(진함)
+    [188, 170, 164], // 회갈색
     [141, 110, 99],  // 갈색
+    [90, 70, 60],    // 진갈색
     [66, 66, 66],    // 검정에 가까운 회색
+    [180, 180, 180], // 회색
     [250, 246, 236], // 종이색(흰색에 가까움)
   ];
 
@@ -154,8 +162,8 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   outCtx.fillStyle = '#faf6ec';
   outCtx.fillRect(0, 0, w, h);
 
-  // --- 2. 큼직한 블록 단위로 뭉개고 팔레트에 스냅, 삐뚤빼뚤하게 색칠 ---
-  const block = Math.max(10, Math.round(Math.min(w, h) / 26)); // 블록 크기 (클수록 더 하찮음)
+  // --- 2. 큼직한 블록 단위로 뭉개고 팔레트에 스냅, 살짝만 삐뚤빼뚤하게 색칠 ---
+  const block = Math.max(16, Math.round(Math.min(w, h) / 16)); // 블록 크기 (클수록 더 뭉툭함)
   const srcData = srcCtx.getImageData(0, 0, w, h).data;
 
   const blockColors = []; // 윤곽선 계산용으로 저장
@@ -183,12 +191,12 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
       const snapped = nearestPaletteColor(r, g, b);
       blockColors[by].push(snapped);
 
-      // 삐뚤빼뚤하게 칠하기: 위치/크기를 랜덤하게 어긋나게, 가끔은 아예 빼먹기(흰 여백)
-      if (Math.random() < 0.94) {
-        const jx = (Math.random() - 0.5) * block * 0.5;
-        const jy = (Math.random() - 0.5) * block * 0.5;
-        const jw = (x1 - x0) * (0.85 + Math.random() * 0.35);
-        const jh = (y1 - y0) * (0.85 + Math.random() * 0.35);
+      // 살짝만 삐뚤빼뚤하게 칠하기: 위치/크기를 아주 조금만 어긋나게, 아주 가끔만 빼먹기
+      if (Math.random() < 0.985) {
+        const jx = (Math.random() - 0.5) * block * 0.14;
+        const jy = (Math.random() - 0.5) * block * 0.14;
+        const jw = (x1 - x0) * (0.97 + Math.random() * 0.08);
+        const jh = (y1 - y0) * (0.97 + Math.random() * 0.08);
         outCtx.fillStyle = `rgb(${snapped[0]}, ${snapped[1]}, ${snapped[2]})`;
         outCtx.fillRect(x0 + jx, y0 + jy, jw, jh);
       }
@@ -213,20 +221,20 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
       const down = by + 1 < rows ? blockColors[by + 1][bx] : null;
       const x0 = bx * block, y0 = by * block;
 
-      if (right && colorDist(cur, right) > 3000 && Math.random() < 0.8) {
-        outCtx.lineWidth = 2.5 + Math.random() * 3;
+      if (right && colorDist(cur, right) > 9500 && Math.random() < 0.55) {
+        outCtx.lineWidth = 1.5 + Math.random() * 1.8;
         outCtx.beginPath();
-        const sx = x0 + block + (Math.random() - 0.5) * 6;
-        outCtx.moveTo(sx, y0 + (Math.random() - 0.5) * 6);
-        outCtx.lineTo(sx + (Math.random() - 0.5) * 6, y0 + block + (Math.random() - 0.5) * 6);
+        const sx = x0 + block + (Math.random() - 0.5) * 4;
+        outCtx.moveTo(sx, y0 + (Math.random() - 0.5) * 4);
+        outCtx.lineTo(sx + (Math.random() - 0.5) * 4, y0 + block + (Math.random() - 0.5) * 4);
         outCtx.stroke();
       }
-      if (down && colorDist(cur, down) > 3000 && Math.random() < 0.8) {
-        outCtx.lineWidth = 2.5 + Math.random() * 3;
+      if (down && colorDist(cur, down) > 9500 && Math.random() < 0.55) {
+        outCtx.lineWidth = 1.5 + Math.random() * 1.8;
         outCtx.beginPath();
-        const sy = y0 + block + (Math.random() - 0.5) * 6;
-        outCtx.moveTo(x0 + (Math.random() - 0.5) * 6, sy);
-        outCtx.lineTo(x0 + block + (Math.random() - 0.5) * 6, sy + (Math.random() - 0.5) * 6);
+        const sy = y0 + block + (Math.random() - 0.5) * 4;
+        outCtx.moveTo(x0 + (Math.random() - 0.5) * 4, sy);
+        outCtx.lineTo(x0 + block + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4);
         outCtx.stroke();
       }
     }
