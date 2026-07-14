@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>하찮은 그림판 🖍️</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Gaegu:wght@400;700&family=Noto+Sans+KR:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- 프레임 테두리에 손그림 느낌을 주는 SVG 필터 (실제 화면엔 안 보임) -->
+  <svg width="0" height="0" style="position:absolute">
+    <filter id="wobbly">
+      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="2" result="noise" seed="3"/>
+      <feDisplacementMap in="SourceGraphic" in2="noise" scale="6"/>
+    </filter>
+  </svg>
+
+  <div class="bg-scribbles" aria-hidden="true"></div>
+
+  <header class="top">
+    <h1 class="logo">하찮은 그림판<span class="dot">.</span></h1>
+    <p class="tagline">잘 찍을 필요 없어요, 어차피 하찮아질 거니까</p>
+  </header>
+
+  <main class="stage">
+
+    <!-- STEP 1: 카메라 -->
+    <section id="camera-step" class="panel active">
+      <div class="frame-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <div class="frame-border"></div>
+        <button id="switch-camera" class="switch-btn" hidden aria-label="카메라 전환">🔄</button>
+      </div>
+      <p id="camera-hint" class="hint">카메라를 켜고 포즈를 잡아보세요</p>
+      <div class="controls">
+        <button id="start-camera" class="btn btn-primary">카메라 켜기</button>
+        <button id="shoot" class="btn btn-shoot" disabled>
+          <span class="shoot-icon">📸</span> 사진 찍기
+        </button>
+      </div>
+    </section>
+
+    <!-- STEP 2: 변환 중 -->
+    <section id="loading-step" class="panel">
+      <div class="loading-frame">
+        <canvas id="loading-canvas"></canvas>
+        <div class="scribble-sweep"></div>
+      </div>
+      <p class="hint loading-text" id="loading-text">유치원생처럼 대충 따라 그리는 중<span class="dots"><span>.</span><span>.</span><span>.</span></span></p>
+      <p class="hint loading-sub">삐뚤빼뚤 색칠하는 중</p>
+    </section>
+
+    <!-- STEP 3: 비교 -->
+    <section id="result-step" class="panel">
+      <p class="hint">슬라이더를 밀어서 비교해보세요 (이 사진은 저장되지도, 전송되지도 않아요)</p>
+      <div class="compare-wrap">
+        <div class="compare" id="compare">
+          <img id="original-img" alt="원본 사진" />
+          <div class="after-clip" id="after-clip">
+            <canvas id="result-canvas"></canvas>
+          </div>
+          <div class="slider-line" id="slider-line">
+            <div class="slider-handle">↔</div>
+          </div>
+          <span class="badge badge-before">원본</span>
+          <span class="badge badge-after" id="badge-after">하찮음</span>
+        </div>
+        <input type="range" id="range" min="0" max="100" value="50" aria-label="비교 슬라이더" />
+      </div>
+      <div class="controls">
+        <button id="download" class="btn btn-primary">그림 저장하기</button>
+        <button id="retry" class="btn btn-ghost">다시 찍기</button>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <p>모든 처리는 이 브라우저 안에서만 이뤄져요. 서버로 전송되지 않습니다.</p>
+  </footer>
+
+  <canvas id="capture-canvas" style="display:none"></canvas>
+
+  <script src="script.js"></script>
+</body>
+</html>
