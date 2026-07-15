@@ -107,15 +107,16 @@ shootBtn.addEventListener('click', () => {
     renderKidPaintStyle(captureCanvas, resultCanvas);
     showStep(resultStep);
     setSliderPosition(50);
-  }, 1000);
+  }, 900);
 });
 
 // ====== "그림판으로 대충 따라 그린" 하찮은 그림 필터 ======
-// 원리: 1) 사진을 큼직한 블록으로 뭉개서 픽셀아트처럼 뭉툭하게 만듦
-//       2) 각 블록 색을 몇 가지 기본 크레용 색으로 강제 스냅 (미묘한 색 표현 불가 = 유치원생 느낌)
-//       3) 블록마다 위치/크기를 살짝씩 어긋나게 칠해서 "선 밖으로 삐져나간" 느낌
-//       4) 윤곽선은 두껍고 뚝뚝 끊기는 삐뚤빼뚤한 선으로, 군데군데 안 채워진 흰 여백도 남김
-//       5) 구석에 삐뚤빼뚤한 낙서 사인까지 추가
+// 원리: 1) 사진 축소본으로 k-평균 군집화를 돌려 "이 사진에 실제로 있는 색" 6~7가지를 뽑아냄
+//         (고정된 색상표 대신 사진마다 맞는 색을 학습하므로 배경/옷 색이 엉뚱하게 안 변함)
+//       2) 사진을 큼직한 블록으로 나눠 각 블록을 학습된 색 중 가장 가까운 것으로 칠함
+//       3) 블록 위치/크기를 아주 살짝 흔들고, 색도 미세하게 흔들어 크레용 느낌 연출
+//       4) 실제로 색이 다른 블록 경계에만 삐뚤빼뚤 끊기는 선을 그림 (억지로 다 긋지 않음)
+//       5) 액자 테두리 + 구석 낙서 사인으로 마무리
 function renderKidPaintStyle(srcCanvas, outCanvas) {
   const w = srcCanvas.width;
   const h = srcCanvas.height;
@@ -124,61 +125,50 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   const srcCtx = srcCanvas.getContext('2d');
   const outCtx = outCanvas.getContext('2d');
 
-  // --- 기본 크레용 팔레트 (전문적인 색 보정 없이 강제로 스냅) ---
-  const PALETTE = [
-    [250, 230, 200], // 살구색(밝은 피부)
-    [224, 172, 130], // 살구색(어두운 피부)
-    [255, 224, 130], // 노랑
-    [255, 183, 77],  // 주황(밝음)
-    [255, 138, 101], // 주황(진함)
-    [239, 83, 80],   // 빨강
-    [186, 104, 200], // 보라
-    [149, 117, 205], // 남보라
-    [66, 133, 244],  // 파랑
-    [100, 181, 246], // 하늘색
-    [77, 182, 172],  // 청록
-    [129, 199, 132], // 초록(밝음)
-    [76, 140, 90],   // 초록(진함)
-    [188, 170, 164], // 회갈색
-    [141, 110, 99],  // 갈색
-    [90, 70, 60],    // 진갈색
-    [66, 66, 66],    // 검정에 가까운 회색
-    [180, 180, 180], // 회색
-    [250, 246, 236], // 종이색(흰색에 가까움)
-  ];
+  // --- 1. 축소본으로 k-평균 학습 (사진에서 실제 색 7가지 추출) ---
+  const K = 7;
+  const smallW = 120;
+  const smallH = Math.max(1, Math.round(h * (smallW / w)));
+  const smallCanvas = document.createElement('canvas');
+  smallCanvas.width = smallW;
+  smallCanvas.height = smallH;
+  const smallCtx = smallCanvas.getContext('2d');
+  smallCtx.drawImage(srcCanvas, 0, 0, smallW, smallH);
+  const samplePixels = smallCtx.getImageData(0, 0, smallW, smallH).data;
+  const centers = kMeansTrain(samplePixels, K, 6);
 
-  function nearestPaletteColor(r, g, b) {
-    let best = PALETTE[0];
+  function nearestCenterIndex(r, g, b) {
+    let best = 0;
     let bestDist = Infinity;
-    for (const c of PALETTE) {
-      const dr = r - c[0], dg = g - c[1], db = b - c[2];
+    for (let c = 0; c < K; c++) {
+      const dr = r - centers[c][0];
+      const dg = g - centers[c][1];
+      const db = b - centers[c][2];
       const dist = dr * dr + dg * dg + db * db;
       if (dist < bestDist) { bestDist = dist; best = c; }
     }
     return best;
   }
 
-  // --- 1. 종이 배경 ---
+  // --- 2. 종이 배경 ---
   outCtx.fillStyle = '#faf6ec';
   outCtx.fillRect(0, 0, w, h);
 
-  // --- 2. 큼직한 블록 단위로 뭉개고 팔레트에 스냅, 살짝만 삐뚤빼뚤하게 색칠 ---
-  const block = Math.max(16, Math.round(Math.min(w, h) / 16)); // 블록 크기 (클수록 더 뭉툭함)
+  // --- 3. 큼직한 블록 단위로 뭉개고 학습된 색으로 칠하기 (살짝만 삐뚤빼뚤하게) ---
+  const block = Math.max(20, Math.round(Math.min(w, h) / 13));
   const srcData = srcCtx.getImageData(0, 0, w, h).data;
-
-  const blockColors = []; // 윤곽선 계산용으로 저장
   const cols = Math.ceil(w / block);
   const rows = Math.ceil(h / block);
+  const blockIdx = [];
 
   for (let by = 0; by < rows; by++) {
-    blockColors.push([]);
+    blockIdx.push([]);
     for (let bx = 0; bx < cols; bx++) {
       const x0 = bx * block;
       const y0 = by * block;
       const x1 = Math.min(w, x0 + block);
       const y1 = Math.min(h, y0 + block);
 
-      // 블록 평균색 계산 (샘플링으로 속도 확보)
       let r = 0, g = 0, b = 0, n = 0;
       for (let y = y0; y < y1; y += 2) {
         for (let x = x0; x < x1; x += 2) {
@@ -188,60 +178,54 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
         }
       }
       r = n ? r / n : 255; g = n ? g / n : 255; b = n ? b / n : 255;
-      const snapped = nearestPaletteColor(r, g, b);
-      blockColors[by].push(snapped);
+      const idx = nearestCenterIndex(r, g, b);
+      blockIdx[by].push(idx);
+      const cc = centers[idx];
 
-      // 살짝만 삐뚤빼뚤하게 칠하기: 위치/크기를 아주 조금만 어긋나게, 아주 가끔만 빼먹기
       if (Math.random() < 0.985) {
+        const jitter = (v) => Math.max(0, Math.min(255, v + (Math.random() - 0.5) * 20));
         const jx = (Math.random() - 0.5) * block * 0.14;
         const jy = (Math.random() - 0.5) * block * 0.14;
         const jw = (x1 - x0) * (0.97 + Math.random() * 0.08);
         const jh = (y1 - y0) * (0.97 + Math.random() * 0.08);
-        outCtx.fillStyle = `rgb(${snapped[0]}, ${snapped[1]}, ${snapped[2]})`;
+        outCtx.fillStyle = `rgb(${jitter(cc[0]) | 0}, ${jitter(cc[1]) | 0}, ${jitter(cc[2]) | 0})`;
         outCtx.fillRect(x0 + jx, y0 + jy, jw, jh);
       }
     }
   }
 
-  // --- 3. 굵고 삐뚤빼뚤 끊기는 윤곽선 (블록 경계에서 색이 크게 바뀌는 곳만) ---
+  // --- 4. 실제로 색이 다른 블록 경계에만 삐뚤빼뚤 끊기는 선 ---
   outCtx.save();
   outCtx.strokeStyle = 'rgba(40,35,30,0.85)';
   outCtx.lineCap = 'round';
   outCtx.lineJoin = 'round';
 
-  function colorDist(c1, c2) {
-    const dr = c1[0] - c2[0], dg = c1[1] - c2[1], db = c1[2] - c2[2];
-    return dr * dr + dg * dg + db * db;
-  }
-
   for (let by = 0; by < rows; by++) {
     for (let bx = 0; bx < cols; bx++) {
-      const cur = blockColors[by][bx];
-      const right = bx + 1 < cols ? blockColors[by][bx + 1] : null;
-      const down = by + 1 < rows ? blockColors[by + 1][bx] : null;
+      const cur = blockIdx[by][bx];
       const x0 = bx * block, y0 = by * block;
 
-      if (right && colorDist(cur, right) > 9500 && Math.random() < 0.55) {
-        outCtx.lineWidth = 1.5 + Math.random() * 1.8;
+      if (bx + 1 < cols && blockIdx[by][bx + 1] !== cur && Math.random() < 0.5) {
+        outCtx.lineWidth = 1.6 + Math.random() * 1.8;
         outCtx.beginPath();
-        const sx = x0 + block + (Math.random() - 0.5) * 4;
-        outCtx.moveTo(sx, y0 + (Math.random() - 0.5) * 4);
-        outCtx.lineTo(sx + (Math.random() - 0.5) * 4, y0 + block + (Math.random() - 0.5) * 4);
+        const sx = x0 + block + (Math.random() - 0.5) * 5;
+        outCtx.moveTo(sx, y0 + (Math.random() - 0.5) * 5);
+        outCtx.lineTo(sx + (Math.random() - 0.5) * 5, y0 + block + (Math.random() - 0.5) * 5);
         outCtx.stroke();
       }
-      if (down && colorDist(cur, down) > 9500 && Math.random() < 0.55) {
-        outCtx.lineWidth = 1.5 + Math.random() * 1.8;
+      if (by + 1 < rows && blockIdx[by + 1][bx] !== cur && Math.random() < 0.5) {
+        outCtx.lineWidth = 1.6 + Math.random() * 1.8;
         outCtx.beginPath();
-        const sy = y0 + block + (Math.random() - 0.5) * 4;
-        outCtx.moveTo(x0 + (Math.random() - 0.5) * 4, sy);
-        outCtx.lineTo(x0 + block + (Math.random() - 0.5) * 4, sy + (Math.random() - 0.5) * 4);
+        const sy = y0 + block + (Math.random() - 0.5) * 5;
+        outCtx.moveTo(x0 + (Math.random() - 0.5) * 5, sy);
+        outCtx.lineTo(x0 + block + (Math.random() - 0.5) * 5, sy + (Math.random() - 0.5) * 5);
         outCtx.stroke();
       }
     }
   }
   outCtx.restore();
 
-  // --- 4. 화면 전체를 감싸는 삐뚤빼뚤한 외곽 테두리 (마우스로 대충 그린 액자) ---
+  // --- 5. 화면 전체를 감싸는 삐뚤빼뚤한 외곽 테두리 ---
   outCtx.save();
   outCtx.strokeStyle = 'rgba(40,35,30,0.7)';
   outCtx.lineWidth = 4;
@@ -256,7 +240,7 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   outCtx.stroke();
   outCtx.restore();
 
-  // --- 5. 구석에 삐뚤빼뚤한 낙서 사인 ---
+  // --- 6. 구석에 삐뚤빼뚤한 낙서 사인 ---
   outCtx.save();
   outCtx.strokeStyle = 'rgba(40,35,30,0.6)';
   outCtx.lineWidth = 2;
@@ -269,6 +253,46 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   }
   outCtx.stroke();
   outCtx.restore();
+}
+
+// ---- k-평균 학습 (RGB 공간, 사진 축소본에서 실제 색 추출) ----
+function kMeansTrain(pixelData, k, iterations) {
+  const points = [];
+  for (let i = 0; i < pixelData.length; i += 4) {
+    points.push([pixelData[i], pixelData[i + 1], pixelData[i + 2]]);
+  }
+  const centers = [];
+  const stride = Math.max(1, Math.floor(points.length / k));
+  for (let i = 0; i < k; i++) {
+    centers.push(points[Math.min(points.length - 1, i * stride)].slice());
+  }
+
+  for (let iter = 0; iter < iterations; iter++) {
+    const sums = Array.from({ length: k }, () => [0, 0, 0, 0]);
+    for (const p of points) {
+      let best = 0;
+      let bestDist = Infinity;
+      for (let c = 0; c < k; c++) {
+        const dr = p[0] - centers[c][0];
+        const dg = p[1] - centers[c][1];
+        const db = p[2] - centers[c][2];
+        const dist = dr * dr + dg * dg + db * db;
+        if (dist < bestDist) { bestDist = dist; best = c; }
+      }
+      sums[best][0] += p[0];
+      sums[best][1] += p[1];
+      sums[best][2] += p[2];
+      sums[best][3] += 1;
+    }
+    for (let c = 0; c < k; c++) {
+      if (sums[c][3] > 0) {
+        centers[c][0] = sums[c][0] / sums[c][3];
+        centers[c][1] = sums[c][1] / sums[c][3];
+        centers[c][2] = sums[c][2] / sums[c][3];
+      }
+    }
+  }
+  return centers;
 }
 
 // ====== 비교 슬라이더 ======
