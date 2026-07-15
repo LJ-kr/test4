@@ -110,13 +110,9 @@ shootBtn.addEventListener('click', () => {
   }, 900);
 });
 
-// ====== "그림판으로 대충 따라 그린" 하찮은 그림 필터 ======
-// 원리: 1) 사진 축소본으로 k-평균 군집화를 돌려 "이 사진에 실제로 있는 색" 6~7가지를 뽑아냄
-//         (고정된 색상표 대신 사진마다 맞는 색을 학습하므로 배경/옷 색이 엉뚱하게 안 변함)
-//       2) 사진을 큼직한 블록으로 나눠 각 블록을 학습된 색 중 가장 가까운 것으로 칠함
-//       3) 블록 위치/크기를 아주 살짝 흔들고, 색도 미세하게 흔들어 크레용 느낌 연출
-//       4) 실제로 색이 다른 블록 경계에만 삐뚤빼뚤 끊기는 선을 그림 (억지로 다 긋지 않음)
-//       5) 액자 테두리 + 구석 낙서 사인으로 마무리
+// ====== "삐뚤빼뚤한 손그림 선" 필터 ======
+// 원리: 원본 사진의 색은 그대로 두고, 윤곽선만 굵고 삐뚤빼뚤하게 여러 겹 겹쳐서
+//       마치 사진을 보고 손으로 대충 따라 그린 것처럼 보이게 합니다.
 function renderKidPaintStyle(srcCanvas, outCanvas) {
   const w = srcCanvas.width;
   const h = srcCanvas.height;
@@ -125,109 +121,66 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   const srcCtx = srcCanvas.getContext('2d');
   const outCtx = outCanvas.getContext('2d');
 
-  // --- 1. 축소본으로 k-평균 학습 (사진에서 실제 색 7가지 추출) ---
-  const K = 7;
-  const smallW = 120;
-  const smallH = Math.max(1, Math.round(h * (smallW / w)));
-  const smallCanvas = document.createElement('canvas');
-  smallCanvas.width = smallW;
-  smallCanvas.height = smallH;
-  const smallCtx = smallCanvas.getContext('2d');
-  smallCtx.drawImage(srcCanvas, 0, 0, smallW, smallH);
-  const samplePixels = smallCtx.getImageData(0, 0, smallW, smallH).data;
-  const centers = kMeansTrain(samplePixels, K, 6);
+  // --- 1. 원본 사진을 색 보정 없이 그대로 베이스로 사용 ---
+  outCtx.drawImage(srcCanvas, 0, 0, w, h);
 
-  function nearestCenterIndex(r, g, b) {
-    let best = 0;
-    let bestDist = Infinity;
-    for (let c = 0; c < K; c++) {
-      const dr = r - centers[c][0];
-      const dg = g - centers[c][1];
-      const db = b - centers[c][2];
-      const dist = dr * dr + dg * dg + db * db;
-      if (dist < bestDist) { bestDist = dist; best = c; }
-    }
-    return best;
-  }
-
-  // --- 2. 종이 배경 ---
-  outCtx.fillStyle = '#faf6ec';
-  outCtx.fillRect(0, 0, w, h);
-
-  // --- 3. 큼직한 블록 단위로 뭉개고 학습된 색으로 칠하기 (살짝만 삐뚤빼뚤하게) ---
-  const block = Math.max(20, Math.round(Math.min(w, h) / 13));
+  // --- 2. 그레이스케일 + Sobel 엣지로 윤곽 추출 ---
   const srcData = srcCtx.getImageData(0, 0, w, h).data;
-  const cols = Math.ceil(w / block);
-  const rows = Math.ceil(h / block);
-  const blockIdx = [];
-
-  for (let by = 0; by < rows; by++) {
-    blockIdx.push([]);
-    for (let bx = 0; bx < cols; bx++) {
-      const x0 = bx * block;
-      const y0 = by * block;
-      const x1 = Math.min(w, x0 + block);
-      const y1 = Math.min(h, y0 + block);
-
-      let r = 0, g = 0, b = 0, n = 0;
-      for (let y = y0; y < y1; y += 2) {
-        for (let x = x0; x < x1; x += 2) {
-          const i = (y * w + x) * 4;
-          r += srcData[i]; g += srcData[i + 1]; b += srcData[i + 2];
-          n++;
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    gray[i] = 0.299 * srcData[i * 4] + 0.587 * srcData[i * 4 + 1] + 0.114 * srcData[i * 4 + 2];
+  }
+  const edge = new Uint8ClampedArray(w * h);
+  const gxK = [-1, 0, 1, -2, 0, 2, -1, 0, 1];
+  const gyK = [-1, -2, -1, 0, 0, 0, 1, 2, 1];
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      let gx = 0, gy = 0, k = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const v = gray[(y + dy) * w + (x + dx)];
+          gx += v * gxK[k];
+          gy += v * gyK[k];
+          k++;
         }
       }
-      r = n ? r / n : 255; g = n ? g / n : 255; b = n ? b / n : 255;
-      const idx = nearestCenterIndex(r, g, b);
-      blockIdx[by].push(idx);
-      const cc = centers[idx];
-
-      if (Math.random() < 0.985) {
-        const jitter = (v) => Math.max(0, Math.min(255, v + (Math.random() - 0.5) * 20));
-        const jx = (Math.random() - 0.5) * block * 0.14;
-        const jy = (Math.random() - 0.5) * block * 0.14;
-        const jw = (x1 - x0) * (0.97 + Math.random() * 0.08);
-        const jh = (y1 - y0) * (0.97 + Math.random() * 0.08);
-        outCtx.fillStyle = `rgb(${jitter(cc[0]) | 0}, ${jitter(cc[1]) | 0}, ${jitter(cc[2]) | 0})`;
-        outCtx.fillRect(x0 + jx, y0 + jy, jw, jh);
-      }
+      edge[y * w + x] = Math.sqrt(gx * gx + gy * gy) > 75 ? 255 : 0;
     }
   }
 
-  // --- 4. 실제로 색이 다른 블록 경계에만 삐뚤빼뚤 끊기는 선 ---
+  const edgeCanvas = document.createElement('canvas');
+  edgeCanvas.width = w;
+  edgeCanvas.height = h;
+  const edgeCtx = edgeCanvas.getContext('2d');
+  const edgeImg = edgeCtx.createImageData(w, h);
+  for (let i = 0; i < w * h; i++) {
+    edgeImg.data[i * 4] = 35;
+    edgeImg.data[i * 4 + 1] = 30;
+    edgeImg.data[i * 4 + 2] = 25;
+    edgeImg.data[i * 4 + 3] = edge[i] ? 255 : 0;
+  }
+  edgeCtx.putImageData(edgeImg, 0, 0);
+
+  // --- 3. 윤곽선을 여러 겹, 살짝씩 어긋나고 회전된 채로 겹쳐 그려서 손떨림 느낌 연출 ---
   outCtx.save();
-  outCtx.strokeStyle = 'rgba(40,35,30,0.85)';
-  outCtx.lineCap = 'round';
-  outCtx.lineJoin = 'round';
-
-  for (let by = 0; by < rows; by++) {
-    for (let bx = 0; bx < cols; bx++) {
-      const cur = blockIdx[by][bx];
-      const x0 = bx * block, y0 = by * block;
-
-      if (bx + 1 < cols && blockIdx[by][bx + 1] !== cur && Math.random() < 0.5) {
-        outCtx.lineWidth = 1.6 + Math.random() * 1.8;
-        outCtx.beginPath();
-        const sx = x0 + block + (Math.random() - 0.5) * 5;
-        outCtx.moveTo(sx, y0 + (Math.random() - 0.5) * 5);
-        outCtx.lineTo(sx + (Math.random() - 0.5) * 5, y0 + block + (Math.random() - 0.5) * 5);
-        outCtx.stroke();
-      }
-      if (by + 1 < rows && blockIdx[by + 1][bx] !== cur && Math.random() < 0.5) {
-        outCtx.lineWidth = 1.6 + Math.random() * 1.8;
-        outCtx.beginPath();
-        const sy = y0 + block + (Math.random() - 0.5) * 5;
-        outCtx.moveTo(x0 + (Math.random() - 0.5) * 5, sy);
-        outCtx.lineTo(x0 + block + (Math.random() - 0.5) * 5, sy + (Math.random() - 0.5) * 5);
-        outCtx.stroke();
-      }
-    }
+  outCtx.globalAlpha = 0.55;
+  const passes = 4;
+  for (let i = 0; i < passes; i++) {
+    const dx = (Math.random() - 0.5) * 5;
+    const dy = (Math.random() - 0.5) * 5;
+    const angle = (Math.random() - 0.5) * 0.02;
+    outCtx.save();
+    outCtx.translate(w / 2 + dx, h / 2 + dy);
+    outCtx.rotate(angle);
+    outCtx.translate(-w / 2, -h / 2);
+    outCtx.drawImage(edgeCanvas, 0, 0, w, h);
+    outCtx.restore();
   }
   outCtx.restore();
 
-  // --- 5. 화면 전체를 감싸는 삐뚤빼뚤한 외곽 테두리 ---
+  // --- 4. 화면 전체를 감싸는 삐뚤빼뚤한 외곽 테두리 ---
   outCtx.save();
-  outCtx.strokeStyle = 'rgba(40,35,30,0.7)';
+  outCtx.strokeStyle = 'rgba(35,30,25,0.75)';
   outCtx.lineWidth = 4;
   outCtx.lineJoin = 'round';
   outCtx.beginPath();
@@ -240,9 +193,9 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   outCtx.stroke();
   outCtx.restore();
 
-  // --- 6. 구석에 삐뚤빼뚤한 낙서 사인 ---
+  // --- 5. 구석에 삐뚤빼뚤한 낙서 사인 ---
   outCtx.save();
-  outCtx.strokeStyle = 'rgba(40,35,30,0.6)';
+  outCtx.strokeStyle = 'rgba(35,30,25,0.6)';
   outCtx.lineWidth = 2;
   outCtx.lineCap = 'round';
   const sx0 = w - 70, sy0 = h - 26;
@@ -253,46 +206,6 @@ function renderKidPaintStyle(srcCanvas, outCanvas) {
   }
   outCtx.stroke();
   outCtx.restore();
-}
-
-// ---- k-평균 학습 (RGB 공간, 사진 축소본에서 실제 색 추출) ----
-function kMeansTrain(pixelData, k, iterations) {
-  const points = [];
-  for (let i = 0; i < pixelData.length; i += 4) {
-    points.push([pixelData[i], pixelData[i + 1], pixelData[i + 2]]);
-  }
-  const centers = [];
-  const stride = Math.max(1, Math.floor(points.length / k));
-  for (let i = 0; i < k; i++) {
-    centers.push(points[Math.min(points.length - 1, i * stride)].slice());
-  }
-
-  for (let iter = 0; iter < iterations; iter++) {
-    const sums = Array.from({ length: k }, () => [0, 0, 0, 0]);
-    for (const p of points) {
-      let best = 0;
-      let bestDist = Infinity;
-      for (let c = 0; c < k; c++) {
-        const dr = p[0] - centers[c][0];
-        const dg = p[1] - centers[c][1];
-        const db = p[2] - centers[c][2];
-        const dist = dr * dr + dg * dg + db * db;
-        if (dist < bestDist) { bestDist = dist; best = c; }
-      }
-      sums[best][0] += p[0];
-      sums[best][1] += p[1];
-      sums[best][2] += p[2];
-      sums[best][3] += 1;
-    }
-    for (let c = 0; c < k; c++) {
-      if (sums[c][3] > 0) {
-        centers[c][0] = sums[c][0] / sums[c][3];
-        centers[c][1] = sums[c][1] / sums[c][3];
-        centers[c][2] = sums[c][2] / sums[c][3];
-      }
-    }
-  }
-  return centers;
 }
 
 // ====== 비교 슬라이더 ======
